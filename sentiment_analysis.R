@@ -1,55 +1,27 @@
-## Sentiment analysis for pruduct review
-#setwd('/Documents/Work/projects/Article_sentiment_analysis')
+# Sentiment analysis for Hubspot reviews
+
+library(tm)
+library(dplyr)
+library(ggplot2)
+library(graph)
+library(Rgraphviz)
+library(FactoMineR)
+library(topicmodels)
 
 ## Loading data
 
-
-#library(xlsx)
-#reviewlist <- read.xlsx("data/Kindle.xlsx", sheetIndex = 1, header = TRUE)
-#reviewlist <- read.csv("data/Kindle.csv")
-
-
-
-
-
-
-library(SnowballC)
-library(wordcloud)
-library(gmodels)
-
-
-set.seed(123)
-
-
-
-### Step 1. Exploring and preparing the data
-
-# Reading the data
-
 reviews <- read.csv('Data/hubspot_reviews3.csv', stringsAsFactors = FALSE)
+
+## Step 1. Exploring and preparing the data
+
 reviews$Date <- as.Date(reviews$Date, "%m/%d/%Y")
-
-
-#reviews$Rating <- factor(reviews$Rating)
 str(reviews$Rating)
 table(reviews$Rating)
 
-# Example of the data
-reviews[12,3]
+### Example of the data
+reviews[1,3]
 
-review_all_text <- reviews[1,3]
-for (i in 2:459) {
-review_all_text <- paste(reviews[i,3], review_all_text)
-}
-write(review_all_text, "review_all_text1.txt")
-
-
-
-# Data preparation -- cleaning and standardizing text data
-
-library(tm)
-library(plyr)
-library(ggplot2)
+### Data preparation -- cleaning and standardizing text data
 
 myCorpus <- Corpus(VectorSource(reviews$Review)) # build a corpus
 
@@ -61,16 +33,20 @@ myCorpus <- myCorpus %>%
   tm_map(stemDocument, lazy=TRUE)%>%
   tm_map(stripWhitespace, lazy=TRUE) # remove extra whitespaces
 
+### Term-document matrix with tf-idf weighting
+
 tdm <- TermDocumentMatrix(myCorpus, control = list(weighting =
-        function(x) weightTfIdf(x, normalize = TRUE)))
+              function(x) weightTfIdf(x, normalize = TRUE)))
 tdm
+
+### Keywords
 
 lowfreq = 3.25
 keywords <- findFreqTerms(tdm, lowfreq)
 term.freq <- rowSums(as.matrix(tdm))
 term.freq <- subset(term.freq, term.freq >= lowfreq)
 df <- data.frame(term = names(term.freq), freq = term.freq)
-df <- arrange(df, desc(freq))
+df <- plyr::arrange(df, freq)
 
 reorder_size <- function(x) {
   factor(x, levels = x)}
@@ -79,67 +55,33 @@ g <- ggplot(df, aes(x = reorder_size(df$term), y = freq)) + geom_bar(stat = "ide
   ylab("Count") + coord_flip()
 g
 
-#associations
+### Associations
 corThreshold = 0.1
 p <- plot(tdm, term = keywords, corThreshold, weighting = T)
 p
 
+### clusters of documents: Hierarchical Clustering on Principle Components (HCPC)
 
-
-#Having the distance matrix, we can use various techniques of cluster analysis for relationship discovery. 
-
-#Let us plot a
-#dendrogram that displays a hierarchical relationship among the documents.
-
-#tdm2 <- removeSparseTerms(tdm, sparse = 0.7) # remove sparse terms
-#m2 <- as.matrix(tdm2)
-
-#distMatrix <- dist(scale(m2))
-#fit <- hclust(distMatrix, method = "ward.D2")
-#plot(fit)
-
-
-#clusters of documents
-library(FactoMineR)
-
-tdm_tf <- TermDocumentMatrix(myCorpus)
-dtm_tf <- as.DocumentTermMatrix(tdm_tf)# Document Term Matrix of reviews
+dtm_tf <- DocumentTermMatrix(myCorpus)# Document Term Matrix of reviews with term frequancy weight
 dtm_tf_matr <- as.matrix(dtm_tf)
-dim(dtm_tf_matr)
-for (i in 1:459) {dimnames(dtm_tf_matr)[[1]][i] <- paste0("doc", i)}
 
-#select only columns with frequent terms
-#nm <- colnames(dtm)
-#con <- nm %in% keywords
-#dtm_short <- dtm[,con]
-#dtm_short <- subset(dtm, select = colnames(dtm)[con])
-
-#Performing of Principal Component Analysis (PCA)
-res.pca <- PCA(dtm_tf_matr, ncp = 5)  
+res.pca <- PCA(dtm_tf_matr)  
 res.hcpc <- HCPC(res.pca)
-#plot(res.hcpc,choice="map")
-#plot(res.hcpc,palette=palette())
 
+### Topic modelling
 
-#Topic models allow the probabilistic modeling of term frequency 
-#occurrences in documents.
-#The fitted model can be used to estimate the similarity between 
-#documents.  The R package "topicmodels" includes interfaces to 
-#two algorithms for fitting topic models: the variational
-#expectation-maximization (VEM) algorithm and an
-#algorithm using Gibbs sampling.
-
-library(topicmodels)
-lda <- LDA(dtm_tf, method = "Gibbs", k = 7) # is used to estimate and fit a latent dirichlet allocation model with the VEM algorithm (default) or Gibbs sampling; k - number of topics to be found.
-term <- terms(lda, 7) # first 7 terms of every topic
+lda <- LDA(dtm_tf, method = "Gibbs", k = 3) # is used to estimate and fit a latent dirichlet allocation model with the VEM algorithm (default) or Gibbs sampling; k - number of topics to be found.
+term <- terms(lda, 8) # first 8 terms of every topic
 term <- apply(term, MARGIN = 2, paste, collapse = ", ")
 term
 
 topic <- topics(lda, 1)
 topics <- data.frame(date=reviews$Date, topic)
-qplot(date, ..count.., data=topics, geom="density",
-      fill=term[topic], position="stack")
-
+topics$topic <- factor(topics$topic,levels=c(1,2,3),
+                      labels=c("Topic1","Topic2","Topic3"))
+qplot(date, ..count.., data=topics, geom = "density", alpha=I(.5),
+      fill=topic, main = "How topics of reviews changed over time",
+      xlab="Date", ylab="Count")
 
 # Sentiment analysis Hu and Liu vocabulary
 hu.liu.pos <- scan('data/positive-words.txt',
